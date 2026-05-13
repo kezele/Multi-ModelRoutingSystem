@@ -1,0 +1,162 @@
+# NOTE 1 - each section of this code should be run in blocks in this order to optimize runtime and compiling dependencies 
+# NOTE 2 - the garbage collection should only be run to optimize GPU memory (VRAM) for model inference and output generation
+
+# installation
+!pip install -q vllm openai
+import vllm
+
+# imports
+from vllm import LLM, SamplingParams
+import time
+import gc
+import torch
+import math
+
+# Keyword lists
+reasoning_keywords = [
+    "compare",
+    "analyze",
+    "design",
+    "evaluate",
+    "explain why",
+    "tradeoff",
+    "optimize",
+    "architecture",
+    "depth",
+    "detail"
+]
+
+media_keywords = [
+    "image",
+    "video",
+    "audio",
+    "diagram",
+    "visual"
+]
+
+# Routing Logic
+def score_prompt_complexity(prompt):
+    score = 0
+    prompt_lower = prompt.lower()
+    words = prompt_lower.split()
+
+    # Rule 1: length
+    if len(words) > 10:
+        score += 1
+
+    # Rule 2: reasoning keywords # Stronger score (heavier weight)
+    if any(keyword in prompt_lower for keyword in reasoning_keywords):
+        score += 2
+
+    # Rule 3: multimedia generation # Stronger score (heavier weight)
+    if any(media_word in prompt_lower for media_word in ["image", "video", "audio", "diagram", "visual"]):
+        score += 2
+
+    return score
+
+#NOTE the max score can be adjusted based on the total rules above (i.e., if a rule is added, increment max score)
+MAX_SCORE = 5
+THRESHOLD_RATIO = 0.5
+THRESHOLD = math.floor(MAX_SCORE * THRESHOLD_RATIO)
+
+def route_prompt(prompt):
+    score = score_prompt_complexity(prompt)
+
+    if score >= THRESHOLD:
+        return "large_model"
+    else:
+        return "small_model"
+
+# sampling parameters
+sampling_params = SamplingParams(
+    temperature=10,
+    max_tokens=40
+)
+
+# Inference function - latency measure and constraints
+def run_inference(prompt, selected_model_name):
+    clear_gpu_memory()
+
+    llm = LLM(
+        model=selected_model_name,
+        gpu_memory_utilization=0.7,
+        enforce_eager=True
+    )
+
+    start_time = time.time()
+
+    formatted_prompt = f"User: {prompt}\nAssistant:"
+
+    outputs = llm.generate([formatted_prompt], sampling_params)
+
+    end_time = time.time()
+
+    latency = end_time - start_time
+    output_text = outputs[0].outputs[0].text
+    generated_tokens = len(outputs[0].outputs[0].token_ids)
+
+    del llm
+    clear_gpu_memory()
+
+    return output_text, latency, generated_tokens
+
+# adaptive pipeline of model selection and outputs
+def generate_response(prompt):
+    score = score_prompt_complexity(prompt)
+    route = route_prompt(prompt)
+
+    if route == "small_model":
+        selected_model = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    else:
+        selected_model = "Qwen/Qwen2.5-0.5B-Instruct"
+
+    output, latency, generated_tokens = run_inference(prompt, selected_model)
+
+    metadata = {
+        "prompt": prompt,
+        "complexity_score": score,
+        "route": route,
+        "selected_model": selected_model,
+        "latency_seconds": latency,
+        "generated_tokens": generated_tokens,
+        "output": output
+    }
+
+    return metadata
+
+# list of test prompts
+test_prompts = [
+    "What is latency?",
+    "Define KV cache.",
+    "What is batching?",
+    "Compare latency and throughput under high concurrency.",
+    "Design an architecture for adaptive LLM routing.",
+    "Analyze the tradeoff between model size and inference cost."
+]
+
+# This code block runs the routing logic implementation
+results = []
+
+for prompt in test_prompts:
+    result = generate_response(prompt)
+    results.append(result)
+
+    print("Prompt:", result["prompt"])
+    print("Score:", result["complexity_score"])
+    print("Route:", result["route"])
+    print("Model:", result["selected_model"])
+    print(f"Latency: {result['latency_seconds']:.2f}s")
+    print("Generated tokens:", result["generated_tokens"])
+    print("Output:", result["output"])
+    print("-" * 50)
+
+#Checks on the metadata of the GPU and CUDA available (determines if gc needs to be run)
+!nvidia-smi
+
+# garbage collector (gc)
+def clear_gpu_memory():
+    gc.collect()
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
