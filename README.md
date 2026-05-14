@@ -20,3 +20,31 @@ The project explored real-world AI infrastructure concepts, including:
 - latency vs model-capacity tradeoffs
 - GPU memory management
 - warm-model vs dynamic-loading architectures
+
+Model Loading Strategy
+Colab Implementation
+Only the selected model is dynamically loaded during inference to reduce VRAM usage.
+
+Tradeoff:
+
+- lower GPU memory usage
+- increased startup latency
+- Future Production Extension
+
+In production environments, both models could remain warm as dedicated inference workers to improve routing speed and scalability.
+
+- Technologies Used
+- Python
+- vLLM
+- Hugging Face Transformers
+- CUDA GPU Acceleration
+- Google Colab
+- Future Improvements
+
+Potential future extensions include:
+
+- REST API deployment
+- distributed inference workers
+- semantic/vector-based routing
+- asynchronous request queueing
+- AWS/Kubernetes deployment
